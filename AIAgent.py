@@ -2,14 +2,13 @@ import os
 import streamlit as st
 from PyPDF2 import PdfReader
 from langchain.schema import Document
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.vectorstores import SupabaseVectorStore
 from langchain.text_splitter import CharacterTextSplitter
+from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_community.vectorstores.supabase import SupabaseVectorStore
 from supabase import create_client, Client
-from postgrest import APIError
+from openai import OpenAI
 import numpy as np
 
-from langchain_community.vectorstores.supabase import SupabaseVectorStore
 
 class SupabaseUUIDVectorStore(SupabaseVectorStore):
     def __init__(self, client, embedding, table_name):
@@ -82,7 +81,7 @@ class SupabaseUUIDVectorStore(SupabaseVectorStore):
 
 # Removed redundant line as openai.api_key is already set
 
-from openai import OpenAI
+
 client = OpenAI()
 client.api_key = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -102,7 +101,7 @@ def extract_text(file):
         return ""
 
 def process_text(text):
-    splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splitter = CharacterTextSplitter(chunk_size=10000, chunk_overlap=50)
     return splitter.split_text(text)
 
 def store_embeddings(chunks):
@@ -118,7 +117,7 @@ def chat_with_doc(db, query):
         model="gpt-4",
         messages=[{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": prompt}]
     )
-    return response.choices[0].message.content
+    return  response.choices[0].message.content
 
 
 # --- Streamlit UI ---
