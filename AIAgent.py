@@ -8,7 +8,10 @@ from langchain_community.vectorstores.supabase import SupabaseVectorStore
 from supabase import create_client, Client
 from openai import OpenAI
 import numpy as np
+import uuid
+import datetime
 
+# --- Custom Vector Store Class ---
 
 class SupabaseUUIDVectorStore(SupabaseVectorStore):
     def __init__(self, client, embedding, table_name):
@@ -18,24 +21,16 @@ class SupabaseUUIDVectorStore(SupabaseVectorStore):
         self.table_name = table_name
 
     @classmethod
-    def from_texts(
-        cls,
-        texts,
-        embedding,
-        client,
-        table_name,
-        metadata=None,
-    ):
+    def from_texts(cls, texts, embedding, client, table_name, metadata=None):
         vectors = embedding.embed_documents(texts)
-
         rows = []
+
         for i, text in enumerate(texts):
             row = {
                 "content": text,
                 "embedding": vectors[i],
+                "metadata": metadata[i] if metadata else {},
             }
-            if metadata:
-                row["metadata"] = metadata[i]
             rows.append(row)
 
         insert_resp = client.table(table_name).insert(rows).execute()
@@ -78,10 +73,6 @@ class SupabaseUUIDVectorStore(SupabaseVectorStore):
         return list(zip(docs, scores))
 
 # --- Config ---
-
-# Removed redundant line as openai.api_key is already set
-
-
 client = OpenAI()
 client.api_key = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
@@ -95,7 +86,8 @@ def extract_text(file):
         reader = PdfReader(file)
         return "\n".join(page.extract_text() for page in reader.pages)
     elif file.name.endswith(".docx"):
-        doc = Document(file)
+        from docx import Document as DocxDocument
+        doc = DocxDocument(file)
         return "\n".join(p.text for p in doc.paragraphs)
     else:
         return ""
@@ -104,39 +96,75 @@ def process_text(text):
     splitter = CharacterTextSplitter(chunk_size=10000, chunk_overlap=50)
     return splitter.split_text(text)
 
-def store_embeddings(chunks):
+def store_embeddings(chunks, doc_name):
     embeddings = OpenAIEmbeddings()
-    return SupabaseUUIDVectorStore.from_texts(chunks, embeddings, client=supabase, table_name="documents")
+    metadata = [{"source": doc_name, "timestamp": datetime.datetime.utcnow().isoformat()}] * len(chunks)
+    SupabaseUUIDVectorStore.from_texts(chunks, embeddings, client=supabase, table_name="documents", metadata=metadata)
 
-
-def chat_with_doc(db, query):
-    results = db.similarity_search(query, k=3)
-    context = "\n".join([r.page_content for r in results])
+def chat_with_doc(db, query, filter=None):
+    results = db.similarity_search_by_vector_with_relevance_scores(
+        embedding=db.embedding.embed_query(query),
+        k=3,
+        filter=filter
+    )
+    context = "\n".join([doc.page_content for doc, score in results])
     prompt = f"Answer the question based on the following context:\n\n{context}\n\nQuestion: {query}"
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": prompt}]
     )
-    return  response.choices[0].message.content
+    return response.choices[0].message.content
 
+def get_distinct_sources():
+    res = supabase.table("documents").select("metadata").execute()
+    sources = set()
+    if res.data:
+        for row in res.data:
+            meta = row.get("metadata", {})
+            if isinstance(meta, dict):
+                sources.add(meta.get("source", "Unknown"))
+    return sorted(list(sources))
 
 # --- Streamlit UI ---
 
-st.title("📄 Chat with Your Document")
+st.set_page_config(page_title="Chat with Docs or Knowledge Base", layout="wide")
+st.title("📄 Chat with Your Documents or Knowledge Base")
 
-uploaded_file = st.file_uploader("Upload a PDF or DOCX file", type=["pdf", "docx"])
+mode = st.radio("Select mode:", ["📤 Upload Document", "🔍 Query Existing Data"])
 
-if uploaded_file:
-    text = extract_text(uploaded_file)
-    st.success("Document uploaded and text extracted.")
+embeddings = OpenAIEmbeddings()
+db = SupabaseUUIDVectorStore(client=supabase, embedding=embeddings, table_name="documents")
 
-    with st.spinner("Processing and embedding..."):
-        chunks = process_text(text)
-        db = store_embeddings(chunks)
-        st.success("Text embedded and stored!")
+# 📤 Upload Mode
+if mode == "📤 Upload Document":
+    uploaded_file = st.file_uploader("Upload a PDF or DOCX file", type=["pdf", "docx"])
+    if uploaded_file:
+        text = extract_text(uploaded_file)
+        st.success("Document uploaded and text extracted.")
+        with st.spinner("Processing and embedding..."):
+            chunks = process_text(text)
+            store_embeddings(chunks, uploaded_file.name)
+            st.success("Text embedded and stored!")
 
-    query = st.text_input("Ask something about the document:")
+# 🔍 Query Mode
+elif mode == "🔍 Query Existing Data":
+    sources = get_distinct_sources()
+    selected_source = st.selectbox("Filter by document name (optional):", ["All"] + sources)
+    metadata_filter = None if selected_source == "All" else {"source": selected_source}
+
+    query = st.text_input("Ask something:")
+    if "query_history" not in st.session_state:
+        st.session_state.query_history = []
+
     if query:
         with st.spinner("Thinking..."):
-            answer = chat_with_doc(db, query)
+            answer = chat_with_doc(db, query, filter=metadata_filter)
+            st.session_state.query_history.append((query, answer))
             st.markdown(f"**Answer:** {answer}")
+
+    if st.session_state.query_history:
+        st.markdown("---")
+        st.markdown("### 🕘 Query History")
+        for q, a in reversed(st.session_state.query_history):
+            with st.expander(f"Q: {q}"):
+                st.markdown(f"**A:** {a}")
