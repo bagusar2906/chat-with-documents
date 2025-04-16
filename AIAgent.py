@@ -81,6 +81,26 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- Helper Functions ---
 
+def get_documents():
+    res = supabase.table("documents").select("metadata").execute()
+    files = {}
+    if res.data:
+        for row in res.data:
+            meta = row.get("metadata", {})
+            if isinstance(meta, dict):
+                source = meta.get("source", "Unknown")
+                timestamp = meta.get("timestamp", "")
+                if source not in files:
+                    files[source] = {"count": 0, "timestamp": timestamp}
+                files[source]["count"] += 1
+    return files
+
+def delete_document(source):
+    supabase.table("documents").delete().match({
+        "metadata->>source": source
+    }).execute()
+
+
 def extract_text(file):
     if file.name.endswith(".pdf"):
         reader = PdfReader(file)
@@ -137,20 +157,27 @@ db = SupabaseUUIDVectorStore(client=supabase, embedding=embeddings, table_name="
 
 # 📤 Upload Mode
 if mode == "📤 Upload Document":
+    st.markdown("---")
+    st.markdown("## 📚 Uploaded Documents")
+    
     uploaded_file = st.file_uploader("Upload a PDF or DOCX file", type=["pdf", "docx"])
     if uploaded_file:
         text = extract_text(uploaded_file)
-        st.success("Document uploaded and text extracted.")
+        st.success("✅ Document uploaded and text extracted.")
+
+        with st.expander("🔍 Preview Document Text"):
+            st.text_area("Document Content", value=text[:3000], height=300)
+
         with st.spinner("Processing and embedding..."):
             chunks = process_text(text)
             store_embeddings(chunks, uploaded_file.name)
-            st.success("Text embedded and stored!")
+            st.success("📌 Text embedded and stored!")
 
 # 🔍 Query Mode
 elif mode == "🔍 Query Existing Data":
-    sources = get_distinct_sources()
-    selected_source = st.selectbox("Filter by document name (optional):", ["All"] + sources)
-    metadata_filter = None if selected_source == "All" else {"source": selected_source}
+    sources = list(get_documents().keys())
+    selected_source = st.selectbox("📁 Filter by document (optional):", ["All"] + sources)
+    metadata_filter = {} if selected_source == "All" else {"source": selected_source}
 
     query = st.text_input("Ask something:")
     if "query_history" not in st.session_state:
@@ -168,3 +195,18 @@ elif mode == "🔍 Query Existing Data":
         for q, a in reversed(st.session_state.query_history):
             with st.expander(f"Q: {q}"):
                 st.markdown(f"**A:** {a}")
+
+with st.expander("📁 Manage Documents"):
+    docs = get_documents()
+    if not docs:
+        st.info("No documents found.")
+    else:
+        for doc_name, info in docs.items():
+            col1, col2, col3 = st.columns([4, 2, 1])
+            col1.markdown(f"**{doc_name}**")
+            col2.markdown(f"{info['count']} chunks")
+            if col3.button("❌ Delete", key=f"del_{doc_name}"):
+                delete_document(doc_name)
+                st.success(f"Deleted '{doc_name}'")
+                st.rerun()
+
