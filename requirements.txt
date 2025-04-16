@@ -1,6 +1,9 @@
 # Core libraries
 streamlit==1.44.1
 
+fastapi==0.115.12
+python-multipart==0.0.20
+
 # LangChain + OpenAI
 langchain==0.3.23
 langchain-community==0.3.21
@@ -18,6 +21,7 @@ google-auth-oauthlib==1.2.0
 # PDF and DOCX processing
 PyPDF2==3.0.1
 python-docx==1.1.0
+docx
 
 # Vector math
 numpy==1.26.4
