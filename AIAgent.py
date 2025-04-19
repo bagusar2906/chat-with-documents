@@ -7,13 +7,12 @@ from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores.supabase import SupabaseVectorStore
 from supabase import create_client, Client
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
-from pytube import YouTube
 import yt_dlp
 from urllib.parse import urlparse, parse_qs
 from openai import OpenAI
 import numpy as np
-import uuid
 import datetime
+from datetime import datetime
 
 # --- Custom Vector Store Class ---
 
@@ -86,16 +85,8 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # --- Helper Functions ---
 
 
-def delete_document2(source):
-    supabase.table("documents").delete().match({
-        "metadata->>source": source
-    }).execute()
-
 import streamlit as st
 
-import streamlit as st
-
-import streamlit as st
 
 def delete_document(source):
     try:
@@ -226,29 +217,7 @@ Question: {query}"""
     )
     return response.choices[0].message.content
 
-def get_documents2():
-    res = supabase.table("documents").select("metadata").execute()
-    files = {}
-    if res.data:
-        for row in res.data:
-            meta = row.get("metadata", {})
-            if isinstance(meta, dict):
-                source = meta.get("source", "Unknown")
-                if source not in files:
-                    files[source] = {
-                        "count": 0,
-                        "timestamp": meta.get("timestamp", ""),
-                        "summary": meta.get("summary", ""),
-                        "title": meta.get("title", ""),
-                        "author": meta.get("author", ""),
-                        "video_url": meta.get("video_url", ""),
-                        "thumbnail_url": meta.get("thumbnail_url", "")
-                    }
-                files[source]["count"] += 1
-    return files
 
-
-from datetime import datetime
 
 def get_documents():
     res = supabase.table("documents").select("id, metadata").execute()
