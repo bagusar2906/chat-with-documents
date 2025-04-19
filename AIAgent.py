@@ -115,8 +115,6 @@ def delete_document(source):
 
 
 
-
-
 def extract_text(file):
     if file.name.endswith(".pdf"):
         reader = PdfReader(file)
@@ -175,15 +173,6 @@ def get_youtube_transcript(url, preferred_languages=['id']):
     except Exception as e:
         st.error(f"❌ Failed to extract transcript: {e}")
         return None
-
-def extract_youtube_transcript(url):
-    try:
-        video_id = extract_video_id(url)
-        transcript = YouTubeTranscriptApi.get_transcript(video_id,languages=['id'])
-        return " ".join([t['text'] for t in transcript])
-    except Exception as e:
-        st.error(f"❌ Failed to extract transcript: {e}")
-        return ""
 
 def generate_summary(text):
     prompt = f"Summarize the following document in 3-4 concise sentences:\n\n{text[:3000]}"
@@ -259,29 +248,53 @@ def get_documents2():
     return files
 
 
+from datetime import datetime
+
 def get_documents():
-    res = supabase.table("documents").select("metadata").execute()
+    res = supabase.table("documents").select("id, metadata").execute()
     files = []
+    seen = set()  # For deduplication
 
     if res.data:
         for row in res.data:
-            meta_list = row.get("metadata", [])
-
-            # Make sure it's a list and iterate through each metadata dict
+            doc_id = row.get("id")
+            meta_list = row.get("metadata")
+            
             if isinstance(meta_list, list):
                 for meta in meta_list:
                     if isinstance(meta, dict):
-                        meta["source"] = meta.get("source", "Unknown")
-                        meta["title"] = meta.get("title", "")
-                        meta["summary"] = meta.get("summary", "")
-                        meta["timestamp"] = meta.get("timestamp", "")
-                        meta["author"] = meta.get("author", "")
-                        meta["video_url"] = meta.get("video_url", "")
-                        meta["thumbnail_url"] = meta.get("thumbnail_url", "")
-                        files.append(meta)
+                        item = {
+                            "document_id": doc_id,
+                            "source": meta.get("source", "Unknown"),
+                            "title": meta.get("title", ""),
+                            "summary": meta.get("summary", ""),
+                            "timestamp": meta.get("timestamp", ""),
+                            "author": meta.get("author", ""),
+                            "video_url": meta.get("video_url", ""),
+                            "thumbnail_url": meta.get("thumbnail_url", "")
+                        }
+
+                        # Create a unique key for deduplication
+                        unique_key = (
+                            item["document_id"],
+                            item["title"],
+                            item["timestamp"]
+                        )
+
+                        if unique_key not in seen:
+                            seen.add(unique_key)
+                            files.append(item)
+
+    # Optional: sort by timestamp if it's a parseable date
+    def parse_time(item):
+        try:
+            return datetime.fromisoformat(item["timestamp"])
+        except Exception:
+            return datetime.min
+
+    files.sort(key=parse_time, reverse=True)
 
     return files
-
 
 # --- Streamlit UI ---
 
@@ -364,18 +377,18 @@ with st.expander("📁 Manage Documents"):
     if not docs:
         st.info("No documents found.")
     else:
-        for doc_name, info in docs:
+        for info in docs:
             col1, col2, col3 = st.columns([4, 2, 1])
-            col1.markdown(f"**{info.get('title') or doc_name}**")
+            col1.markdown(f"**{info['title']}**")
             if info.get("video_url"):
                 col1.markdown(f"[▶️ Watch Video]({info['video_url']})")
-            col2.markdown(f"{info['count']} chunks")
-            if col3.button("❌ Delete", key=f"del_{doc_name}"):
-                delete_document(doc_name)
-                st.success(f"Deleted '{doc_name}'")
+           # col2.markdown(f"{info['count']} chunks")
+            if col3.button("❌ Delete", key=f"del_{info['title']}"):
+                delete_document(info["source"])
+                st.success(f"Deleted '{info['title']}'")
                 st.rerun()
             if info.get("thumbnail_url"):
                 st.image(info["thumbnail_url"], width=320)
             if info.get("summary"):
-                with st.expander("📝 Summary"):
-                    st.markdown(info["summary"])
+                #with st.expander("📝 Summary"):
+                st.markdown(info["summary"])
