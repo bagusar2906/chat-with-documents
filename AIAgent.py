@@ -12,7 +12,7 @@ from urllib.parse import urlparse, parse_qs
 from openai import OpenAI
 import numpy as np
 import datetime
-from datetime import datetime
+from datetime import datetime, timezone
 
 # --- Custom Vector Store Class ---
 
@@ -30,6 +30,7 @@ class SupabaseUUIDVectorStore(SupabaseVectorStore):
 
         for i, text in enumerate(texts):
             row = {
+                "source": f"{metadata[i]['source'] if metadata else 'unknown'}",
                 "content": text,
                 "embedding": vectors[i],
                 "metadata": metadata[i] if metadata else {},
@@ -80,7 +81,7 @@ client = OpenAI()
 client.api_key = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabaseClient: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- Helper Functions ---
 
@@ -90,20 +91,19 @@ import streamlit as st
 
 def delete_document(source):
     try:
-        response = supabase.table("documents") \
+        response = supabaseClient.table("documents") \
             .delete() \
-            .filter("metadata->>source", "eq", source) \
+            .filter("source", "eq", source) \
             .execute()
 
-        if response.error:
-            st.error(f"Failed to delete document: {response.error.message}")
+        if not response.data:
+            st.error(f"Failed to delete document: {source}")
         else:
             st.success("Document deleted successfully.")
-            st.json(response.data)  # Optional: Show deleted rows
+            #st.json(response.data)  # Optional: Show deleted rows
 
     except Exception as e:
         st.exception(f"Error occurred while deleting document: {e}")
-
 
 
 def extract_text(file):
@@ -176,21 +176,34 @@ def generate_summary(text):
     )
     return response.choices[0].message.content.strip()
 
-def store_embeddings(chunks, doc_name, extra_metadata=None):
+def store_embeddings(supabase, chunks, doc_name, extra_metadata=None):
     embeddings = OpenAIEmbeddings()
     summary = generate_summary(" ".join(chunks))
     base_metadata = {
         "source": doc_name,
-        "timestamp": datetime.datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "summary": summary,
     }
     if extra_metadata:
         base_metadata.update(extra_metadata)
     metadata = [base_metadata] * len(chunks)
-    SupabaseVectorStore.from_texts(chunks, embeddings, client=supabase, table_name="documents", metadata=metadata)
-
+    supabase.from_texts(chunks, embeddings, client=supabaseClient, table_name="documents", metadata=metadata)
 
 def chat_with_doc(db, query, filter=None):
+    results = db.similarity_search_by_vector_with_relevance_scores(
+        embedding=db.embedding.embed_query(query),
+        k=3,
+        filter=filter or {}
+    )
+    context = "\n".join([r.page_content for r in results])
+    prompt = f"Answer the question based on the following context:\n\n{context}\n\nQuestion: {query}"
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": prompt}]
+    )
+    return  response.choices[0].message.content
+
+def chat_with_doc_summary(db, query, filter=None):
     results = db.similarity_search_by_vector_with_relevance_scores(
         embedding=db.embedding.embed_query(query),
         k=3,
@@ -218,42 +231,38 @@ Question: {query}"""
     return response.choices[0].message.content
 
 
-
 def get_documents():
-    res = supabase.table("documents").select("id, metadata").execute()
+    res = supabaseClient.table("documents").select("id, source, metadata").execute()
     files = []
     seen = set()  # For deduplication
 
     if res.data:
         for row in res.data:
             doc_id = row.get("id")
-            meta_list = row.get("metadata")
-            
-            if isinstance(meta_list, list):
-                for meta in meta_list:
-                    if isinstance(meta, dict):
-                        item = {
-                            "document_id": doc_id,
-                            "source": meta.get("source", "Unknown"),
-                            "title": meta.get("title", ""),
-                            "summary": meta.get("summary", ""),
-                            "timestamp": meta.get("timestamp", ""),
-                            "author": meta.get("author", ""),
-                            "video_url": meta.get("video_url", ""),
-                            "thumbnail_url": meta.get("thumbnail_url", "")
-                        }
+            meta = row.get("metadata")
+            if isinstance(meta, dict):
+                item = {
+                    "document_id": doc_id,
+                    "source": meta.get("source", "Unknown"),
+                    "title": meta.get("title", ""),
+                    "summary": meta.get("summary", ""),
+                    "timestamp": meta.get("timestamp", ""),
+                    "author": meta.get("author", ""),
+                    "video_url": meta.get("video_url", ""),
+                    "thumbnail_url": meta.get("thumbnail_url", "")
+                }
 
-                        # Create a unique key for deduplication
-                        unique_key = (
-                            item["document_id"],
-                            item["title"],
-                            item["timestamp"]
-                        )
+                # Create a unique key for deduplication
+                unique_key = (
+                    #  item["document_id"],
+                    item["source"],
+                    # item["timestamp"]
+                )
 
-                        if unique_key not in seen:
-                            seen.add(unique_key)
-                            files.append(item)
-
+                if unique_key not in seen:
+                    seen.add(unique_key)
+                    files.append(item)
+                    
     # Optional: sort by timestamp if it's a parseable date
     def parse_time(item):
         try:
@@ -272,7 +281,7 @@ st.title("📄🤖 Chat with Your Docs or YouTube Videos")
 mode = st.radio("Select mode:", ["📤 Upload Document", "🔍 Query Existing Data", "▶️ Embed YouTube Video"])
 
 embeddings = OpenAIEmbeddings()
-db = SupabaseUUIDVectorStore(client=supabase, embedding=embeddings, table_name="documents")
+db = SupabaseUUIDVectorStore(client=supabaseClient, embedding=embeddings, table_name="documents")
 
 # 📤 Upload Mode
 if mode == "📤 Upload Document":
@@ -287,7 +296,7 @@ if mode == "📤 Upload Document":
             st.text_area("Document Content", value=text[:3000], height=300)
         with st.spinner("Processing and embedding..."):
             chunks = process_text(text)
-            store_embeddings(chunks, uploaded_file.name)
+            store_embeddings(db,chunks, uploaded_file.name)
             st.success("📌 Text embedded and stored!")
 
 # Embed YouTube
@@ -306,7 +315,7 @@ elif mode == "▶️ Embed YouTube Video":
             if st.button("Embed YouTube Transcript"):
                 with st.spinner("Generating summary and embedding..."):
                     chunks = process_text(transcript)
-                    store_embeddings(chunks, f"YouTube: {meta['video_id']}", {
+                    store_embeddings(db, chunks, f"YouTube: {meta['video_id']}", {
                         "title": meta["title"],
                         "author": meta["author"],
                         "video_url": meta["video_url"],
@@ -316,7 +325,6 @@ elif mode == "▶️ Embed YouTube Video":
 
 # 🔍 Query Mode
 elif mode == "🔍 Query Existing Data":
-    #sources = list(get_documents().keys())
     sources = get_documents()
     selected_source = st.selectbox("📁 Filter by document (optional):", ["All"] + sources)
     metadata_filter = {} if selected_source == "All" else {"source": selected_source}
@@ -348,13 +356,13 @@ with st.expander("📁 Manage Documents"):
     else:
         for info in docs:
             col1, col2, col3 = st.columns([4, 2, 1])
-            col1.markdown(f"**{info['title']}**")
+            col1.markdown(f"**{info['source']}**")
             if info.get("video_url"):
                 col1.markdown(f"[▶️ Watch Video]({info['video_url']})")
            # col2.markdown(f"{info['count']} chunks")
-            if col3.button("❌ Delete", key=f"del_{info['title']}"):
-                delete_document(info["source"])
-                st.success(f"Deleted '{info['title']}'")
+            if col3.button("❌ Delete", key=f"del_{info['source']})"):
+                delete_document(info['source'])
+                st.success(f"Deleted '{info['source']}'")
                 st.rerun()
             if info.get("thumbnail_url"):
                 st.image(info["thumbnail_url"], width=320)
