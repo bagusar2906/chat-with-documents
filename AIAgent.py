@@ -12,19 +12,12 @@ import datetime
 from datetime import datetime, timezone
 from custom_supabase_store import CustomeSupabaseVectorStore
 
-
 # --- Config ---
 client = OpenAI()
 client.api_key = os.getenv("OPENAI_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabaseClient: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# --- Helper Functions ---
-
-
-import streamlit as st
-
 
 def delete_document(source):
     try:
