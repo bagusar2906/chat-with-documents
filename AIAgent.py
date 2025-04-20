@@ -1,80 +1,20 @@
 import os
 import streamlit as st
 from PyPDF2 import PdfReader
-from langchain.schema import Document
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.embeddings import OpenAIEmbeddings
-from langchain_community.vectorstores.supabase import SupabaseVectorStore
 from supabase import create_client, Client
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
 import yt_dlp
 from urllib.parse import urlparse, parse_qs
 from openai import OpenAI
-import numpy as np
 import datetime
 from datetime import datetime, timezone
+from custom_supabase_store import CustomeSupabaseVectorStore
 
-# --- Custom Vector Store Class ---
 
-class SupabaseUUIDVectorStore(SupabaseVectorStore):
-    def __init__(self, client, embedding, table_name):
-        self.client = client
-        self.embedding = embedding
-        self._embedding = embedding 
-        self.table_name = table_name
 
-    @classmethod
-    def from_texts(cls, texts, embedding, client, table_name, metadata=None):
-        vectors = embedding.embed_documents(texts)
-        rows = []
 
-        for i, text in enumerate(texts):
-            row = {
-                "source": f"{metadata[i]['source'] if metadata else 'unknown'}",
-                "content": text,
-                "embedding": vectors[i],
-                "metadata": metadata[i] if metadata else {},
-            }
-            rows.append(row)
-
-        insert_resp = client.table(table_name).insert(rows).execute()
-
-        if insert_resp.data is None:
-            raise Exception(f"Failed to insert documents")
-
-        return cls(client=client, embedding=embedding, table_name=table_name)
-
-    def similarity_search_by_vector_with_relevance_scores(
-        self, embedding, k=4, filter=None, **kwargs
-    ):
-        if isinstance(embedding, np.ndarray):
-            embedding = embedding.tolist()
-
-        try:
-            response = self.client.rpc(
-                "match_documents",
-                {
-                    "query_embedding": embedding,
-                    "match_count": k,
-                    "filter": filter or {},
-                },
-            ).execute()
-        except Exception as e:
-            raise ValueError(f"Error querying Supabase: {e}")
-
-        if not response.data:
-            return []
-
-        docs = []
-        scores = []
-        for match in response.data:
-            metadata = match.get("metadata", {})
-            text = match.get("content", "")
-            score = match.get("similarity", 0)
-            docs.append(Document(page_content=text, metadata=metadata))
-            scores.append(score)
-
-        return list(zip(docs, scores))
 
 # --- Config ---
 client = OpenAI()
@@ -195,13 +135,29 @@ def chat_with_doc(db, query, filter=None):
         k=3,
         filter=filter or {}
     )
-    context = "\n".join([r.page_content for r in results])
+
+    # Safely extract page_content only if it exists
+    context_parts = []
+    for r in results:
+        try:
+            context_parts.append(r.page_content)
+        except AttributeError:
+           # print(f"Skipping result without 'page_content': {r}")
+            continue
+
+    context = "\n".join(context_parts)
+
     prompt = f"Answer the question based on the following context:\n\n{context}\n\nQuestion: {query}"
+    
     response = client.chat.completions.create(
         model="gpt-4",
-        messages=[{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": prompt}]
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt}
+        ]
     )
-    return  response.choices[0].message.content
+
+    return response.choices[0].message.content
 
 def chat_with_doc_summary(db, query, filter=None):
     results = db.similarity_search_by_vector_with_relevance_scores(
@@ -281,7 +237,7 @@ st.title("📄🤖 Chat with Your Docs or YouTube Videos")
 mode = st.radio("Select mode:", ["📤 Upload Document", "🔍 Query Existing Data", "▶️ Embed YouTube Video"])
 
 embeddings = OpenAIEmbeddings()
-db = SupabaseUUIDVectorStore(client=supabaseClient, embedding=embeddings, table_name="documents")
+db = CustomeSupabaseVectorStore(client=supabaseClient, embedding=embeddings, table_name="documents")
 
 # 📤 Upload Mode
 if mode == "📤 Upload Document":
