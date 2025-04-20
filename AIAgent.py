@@ -272,7 +272,8 @@ elif mode == "▶️ Embed YouTube Video":
 # 🔍 Query Mode
 elif mode == "🔍 Query Existing Data":
     sources = get_documents()
-    selected_source = st.selectbox("📁 Filter by document (optional):", ["All"] + sources)
+    titles = [doc.get('title', 'N/A') for doc in sources]
+    selected_source = st.selectbox("📁 Filter by document (optional):", ["All"] + titles)
     metadata_filter = {} if selected_source == "All" else {"source": selected_source}
 
     query = st.text_input("Ask something:")
@@ -302,7 +303,7 @@ with st.expander("📁 Manage Documents"):
     else:
         for info in docs:
             col1, col2, col3 = st.columns([4, 2, 1])
-            col1.markdown(f"**{info['source']}**")
+            col1.markdown(f"**{info['title']}**")
             if info.get("video_url"):
                 col1.markdown(f"[▶️ Watch Video]({info['video_url']})")
            # col2.markdown(f"{info['count']} chunks")
@@ -315,3 +316,4 @@ with st.expander("📁 Manage Documents"):
             if info.get("summary"):
                 #with st.expander("📝 Summary"):
                 st.markdown(info["summary"])
+            st.markdown("---")
