@@ -4,6 +4,7 @@ create extension if not exists vector;
 -- Create the documents table with vector embeddings and optional metadata
 create table if not exists documents (
   id uuid primary key default gen_random_uuid(),
+  source text,
   content text,
   embedding vector(1536), -- Adjust the dimension based on your embedding model
   metadata jsonb
@@ -17,6 +18,7 @@ create or replace function match_documents(
 )
 returns table (
     id uuid,
+    source text,
     content text,
     metadata jsonb,
     similarity float
@@ -25,6 +27,7 @@ language sql
 as $$
   select
     id,
+    source,
     content,
     metadata,
     1 - (embedding <=> query_embedding) as similarity
