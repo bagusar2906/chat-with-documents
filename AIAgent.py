@@ -303,7 +303,7 @@ with st.expander("📁 Manage Documents"):
     else:
         for info in docs:
             col1, col2, col3 = st.columns([4, 2, 1])
-            col1.markdown(f"**{info['title']}**")
+            col1.markdown(f"**{info['title'] or info['source'] }**")
             if info.get("video_url"):
                 col1.markdown(f"[▶️ Watch Video]({info['video_url']})")
            # col2.markdown(f"{info['count']} chunks")
