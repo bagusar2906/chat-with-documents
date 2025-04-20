@@ -8,6 +8,7 @@ python-multipart==0.0.20
 langchain==0.3.19
 langchain-community==0.3.18
 openai==1.73.0
+tiktoken==0.9.0
 
 # Supabase + Embedding handling
 supabase==1.2.0
