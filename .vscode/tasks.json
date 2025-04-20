@@ -1,0 +1,20 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Run Streamlit App",
+        "type": "shell",
+        "command": "streamlit run AIAgent.py",
+        "group": {
+          "kind": "build",
+          "isDefault": true
+        },
+        "presentation": {
+          "reveal": "always",
+          "panel": "new"
+        },
+        "problemMatcher": []
+      }
+    ]
+  }
+  
