@@ -13,9 +13,6 @@ from datetime import datetime, timezone
 from custom_supabase_store import CustomeSupabaseVectorStore
 
 
-
-
-
 # --- Config ---
 client = OpenAI()
 client.api_key = os.getenv("OPENAI_API_KEY")
