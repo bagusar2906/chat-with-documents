@@ -23,5 +23,9 @@ PyPDF2==3.0.1
 python-docx==1.1.0
 docx
 
+# Youtube
+yt-dlp
+youtube_transcript_api
+
 # Vector math
 numpy==1.26.4
