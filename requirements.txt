@@ -5,13 +5,12 @@ fastapi==0.115.12
 python-multipart==0.0.20
 
 # LangChain + OpenAI
-langchain==0.3.23
-langchain-community==0.3.21
+langchain==0.3.19
+langchain-community==0.3.18
 openai==1.73.0
 
 # Supabase + Embedding handling
 supabase==1.2.0
-
 
 # Google Drive integration
 google-api-python-client==2.118.0
@@ -21,7 +20,7 @@ google-auth-oauthlib==1.2.0
 # PDF and DOCX processing
 PyPDF2==3.0.1
 python-docx==1.1.0
-docx
+docx=0.2.4
 
 # Youtube
 yt-dlp
